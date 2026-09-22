@@ -1,0 +1,16 @@
+{
+  "name": "up-drive",
+  "version": "1.0.0",
+  "description": "University of Phayao ride booking system",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.3"
+  }
+}
