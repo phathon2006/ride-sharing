@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>UP Drive - History</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+
+</head>
+
+<body>
+
+<nav class="navbar">
+
+  <div class="logo">
+    🚗 UP Drive
+  </div>
+
+  <div class="nav-links">
+
+    <a
+      id="backLink"
+      href="/"
+    >
+      กลับ
+    </a>
+
+    <button onclick="logout()">
+      ออกจากระบบ
+    </button>
+
+  </div>
+
+</nav>
+
+<main class="container">
+
+  <section class="hero">
+
+    <h1>
+      ประวัติการเดินทาง
+    </h1>
+
+    <p id="userName">
+      กำลังโหลด...
+    </p>
+
+  </section>
+
+  <section class="card">
+
+    <div id="history">
+
+      <div class="empty">
+        กำลังโหลด...
+      </div>
+
+    </div>
+
+  </section>
+
+</main>
+
+<script>
+
+const session =
+  JSON.parse(
+    localStorage.getItem(
+      "up_drive_session"
+    ) || "null"
+  );
+
+const profile =
+  JSON.parse(
+    localStorage.getItem(
+      "up_drive_profile"
+    ) || "null"
+  );
+
+if (
+  !session ||
+  !profile
+) {
+
+  location.href =
+    "/";
+
+}
+
+document.getElementById(
+  "userName"
+).textContent =
+  profile.name;
+
+document.getElementById(
+  "backLink"
+).href =
+  profile.role ===
+  "driver"
+    ? "/driver.html"
+    : "/passenger.html";
+
+function escapeHtml(value) {
+
+  return String(
+    value || ""
+  )
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+function statusLabel(status) {
+
+  const labels = {
+
+    searching:
+      "กำลังค้นหา",
+
+    matched:
+      "จับคู่แล้ว",
+
+    sent_to_driver:
+      "ส่งงานให้คนขับแล้ว",
+
+    accepted:
+      "คนขับรับงานแล้ว",
+
+    completed:
+      "เดินทางเสร็จแล้ว",
+
+    cancelled:
+      "ยกเลิก"
+
+  };
+
+  return (
+    labels[status] ||
+    status
+  );
+
+}
+
+async function loadHistory() {
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/history",
+        {
+          headers: {
+            Authorization:
+              `Bearer ${session.access_token}`
+          }
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+
+      throw new Error(
+        data.error
+      );
+
+    }
+
+    renderHistory(
+      data
+    );
+
+  } catch (error) {
+
+    document.getElementById(
+      "history"
+    ).innerHTML =
+      `
+        <div class="alert alert-error">
+          ${escapeHtml(
+            error.message
+          )}
+        </div>
+      `;
+
+  }
+
+}
+
+function renderHistory(
+  data
+) {
+
+  const items =
+    data.rides || [];
+
+  if (!items.length) {
+
+    document.getElementById(
+      "history"
+    ).innerHTML =
+      `
+        <div class="empty">
+          ยังไม่มีประวัติ
+        </div>
+      `;
+
+    return;
+
+  }
+
+  let html = "";
+
+  for (
+    const item of items
+  ) {
+
+    if (
+      data.role ===
+      "passenger"
+    ) {
+
+      html +=
+        `
+          <div class="member">
+
+            <div class="member-row">
+
+              <strong>
+                🚗 การเดินทาง
+              </strong>
+
+              <span class="status">
+                ${statusLabel(
+                  item.status
+                )}
+              </span>
+
+            </div>
+
+            <div class="route-line">
+
+              <div class="point point-pickup">
+                📍
+                ${escapeHtml(
+                  item.origin_text
+                )}
+              </div>
+
+              <div class="point point-destination">
+                🏁
+                ${escapeHtml(
+                  item.destination_text
+                )}
+              </div>
+
+            </div>
+
+            <div class="muted small">
+
+              เป้าหมาย:
+              ${item.target_passengers}
+              คน
+
+              <br>
+
+              ${new Date(
+                item.created_at
+              ).toLocaleString(
+                "th-TH"
+              )}
+
+            </div>
+
+          </div>
+        `;
+
+    } else {
+
+      html +=
+        `
+          <div class="member">
+
+            <div class="member-row">
+
+              <strong>
+                🚗 งานกลุ่ม
+              </strong>
+
+              <span class="status">
+                ${statusLabel(
+                  item.status
+                )}
+              </span>
+
+            </div>
+
+            <p>
+              ผู้โดยสาร:
+              ${item.actual_passengers}
+              คน
+            </p>
+
+            ${
+              item.members
+                ?.map(
+                  m =>
+                    `
+                      <div class="small">
+
+                        👤
+                        ${escapeHtml(
+                          m.passenger?.name
+                        )}
+
+                        ·
+
+                        ${escapeHtml(
+                          m.ride?.origin_text
+                        )}
+
+                        →
+
+                        ${escapeHtml(
+                          m.ride?.destination_text
+                        )}
+
+                      </div>
+                    `
+                )
+                .join("") ||
+              ""
+            }
+
+          </div>
+        `;
+
+    }
+
+  }
+
+  document.getElementById(
+    "history"
+  ).innerHTML =
+    html;
+
+}
+
+function logout() {
+
+  localStorage.removeItem(
+    "up_drive_session"
+  );
+
+  localStorage.removeItem(
+    "up_drive_profile"
+  );
+
+  location.href =
+    "/";
+
+}
+
+loadHistory();
+
+</script>
+
+</body>
+</html>

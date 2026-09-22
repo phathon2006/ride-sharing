@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>UP Drive - Driver</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
+
+</head>
+
+<body>
+
+<nav class="navbar">
+
+  <div class="logo">
+    🚗 UP Drive Driver
+  </div>
+
+  <div class="nav-links">
+
+    <a href="/driver.html">
+      งาน
+    </a>
+
+    <a href="/history.html">
+      ประวัติ
+    </a>
+
+    <button onclick="logout()">
+      ออกจากระบบ
+    </button>
+
+  </div>
+
+</nav>
+
+<main class="container">
+
+  <section class="hero">
+
+    <h1>
+      Driver Dashboard
+    </h1>
+
+    <p id="driverInfo">
+      กำลังโหลด...
+    </p>
+
+    <div class="driver-status">
+
+      <span
+        id="gpsDot"
+        class="gps-dot"
+      ></span>
+
+      <span id="gpsStatus">
+        GPS ยังไม่เริ่ม
+      </span>
+
+    </div>
+
+  </section>
+
+  <div
+    id="message"
+    style="display:none"
+  ></div>
+
+  <section class="card">
+
+    <h2>
+      🗺️ แผนที่
+    </h2>
+
+    <div
+      id="map"
+      class="map"
+    ></div>
+
+  </section>
+
+  <br>
+
+  <section class="card">
+
+    <h2>
+      📋 งานที่มีอยู่
+    </h2>
+
+    <div id="jobs">
+
+      <div class="empty">
+        กำลังโหลดงาน...
+      </div>
+
+    </div>
+
+  </section>
+
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script src="/map.js"></script>
+
+<script>
+
+const $ = (id) =>
+  document.getElementById(id);
+
+let session = null;
+
+let profile = null;
+
+let jobs = [];
+
+let gpsWatchId = null;
+
+let realtimeChannel = null;
+
+function getSession() {
+
+  try {
+    return JSON.parse(
+      localStorage.getItem(
+        "up_drive_session"
+      )
+    );
+  } catch {
+    return null;
+  }
+
+}
+
+function getProfile() {
+
+  try {
+    return JSON.parse(
+      localStorage.getItem(
+        "up_drive_profile"
+      )
+    );
+  } catch {
+    return null;
+  }
+
+}
+
+function showMessage(
+  text,
+  type = "error"
+) {
+
+  const box =
+    $("message");
+
+  box.className =
+    `alert ${
+      type === "success"
+        ? "alert-success"
+        : "alert-error"
+    }`;
+
+  box.textContent =
+    text;
+
+  box.style.display =
+    "block";
+
+}
+
+function escapeHtml(value) {
+
+  return String(
+    value || ""
+  )
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+async function api(
+  url,
+  options = {}
+) {
+
+  const response =
+    await fetch(
+      url,
+      {
+        ...options,
+
+        headers: {
+          "Content-Type":
+            "application/json",
+
+          Authorization:
+            `Bearer ${session.access_token}`,
+
+          ...(options.headers || {})
+        }
+      }
+    );
+
+  const data =
+    await response
+      .json()
+      .catch(() => ({}));
+
+  if (!response.ok) {
+
+    throw new Error(
+      data.error ||
+      "เกิดข้อผิดพลาด"
+    );
+
+  }
+
+  return data;
+
+}
+
+/* =====================================================
+   RENDER JOBS
+===================================================== */
+
+function renderJobs() {
+
+  if (!jobs.length) {
+
+    $("jobs").innerHTML =
+      `
+        <div class="empty">
+          ยังไม่มีงานที่รอรับ
+        </div>
+      `;
+
+    return;
+
+  }
+
+  $("jobs").innerHTML =
+    jobs.map(
+      job =>
+        renderJob(job)
+    ).join("");
+
+}
+
+function renderJob(job) {
+
+  const isAccepted =
+    job.status ===
+    "accepted";
+
+  let html =
+    `
+      <div class="card"
+           style="margin-bottom:15px">
+
+        <div class="member-row">
+
+          <div>
+
+            <h3>
+              🚗 งาน #${job.id.slice(0,8)}
+            </h3>
+
+            <span class="status ${
+              isAccepted
+                ? "status-success"
+                : "status-warning"
+            }">
+
+              ${escapeHtml(
+                job.status_label
+              )}
+
+            </span>
+
+          </div>
+
+          <div>
+            <strong>
+              ${job.actual_passengers}
+              /
+              ${job.target_passengers}
+              คน
+            </strong>
+          </div>
+
+        </div>
+
+        <hr>
+
+        <h3>
+          👥 ผู้โดยสาร
+        </h3>
+    `;
+
+  for (
+    const member of
+    job.members || []
+  ) {
+
+    html +=
+      `
+        <div class="member">
+
+          <strong>
+            👤
+            ${escapeHtml(
+              member.passenger?.name
+            )}
+          </strong>
+
+          <br>
+
+          📞
+          ${escapeHtml(
+            member.passenger?.phone
+          )}
+
+          <div class="route-line">
+
+            <div class="point point-pickup">
+
+              📍 รับ:
+              ${escapeHtml(
+                member.ride?.origin_text
+              )}
+
+            </div>
+
+            <div class="point point-destination">
+
+              🏁 ส่ง:
+              ${escapeHtml(
+                member.ride?.destination_text
+              )}
+
+            </div>
+
+          </div>
+
+        </div>
+      `;
+
+  }
+
+  if (
+    job.route
+  ) {
+
+    html +=
+      `
+        <div class="alert alert-success">
+
+          🛣️ ระยะทาง:
+          ${formatDistance(
+            job.route.distance_meters
+          )}
+
+          <br>
+
+          ⏱️ เวลา:
+          ${formatDuration(
+            job.route.duration_seconds
+          )}
+
+        </div>
+      `;
+
+  }
+
+  if (
+    job.status ===
+    "sent_to_driver"
+  ) {
+
+    html +=
+      `
+        <button
+          class="btn btn-success btn-block"
+          onclick="acceptJob('${job.id}')"
+        >
+          ✓ รับงานนี้
+        </button>
+      `;
+
+  }
+
+  if (
+    job.status ===
+    "accepted"
+  ) {
+
+    html +=
+      `
+        <div class="alert alert-success">
+
+          ✓ คุณรับงานนี้แล้ว
+
+          <br>
+
+          กำลังส่ง GPS ให้ผู้โดยสาร
+
+        </div>
+
+        <button
+          class="btn btn-primary btn-block"
+          onclick="completeJob('${job.id}')"
+        >
+          🏁 จบทริป
+        </button>
+      `;
+
+  }
+
+  html +=
+    `</div>`;
+
+  return html;
+
+}
+
+/* =====================================================
+   ACCEPT
+===================================================== */
+
+async function acceptJob(
+  id
+) {
+
+  if (
+    !confirm(
+      "ยืนยันรับงานนี้หรือไม่?"
+    )
+  ) {
+    return;
+  }
+
+  try {
+
+    const data =
+      await api(
+        `/api/driver/jobs/${id}/accept`,
+        {
+          method: "POST"
+        }
+      );
+
+    showMessage(
+      "รับงานเรียบร้อย",
+      "success"
+    );
+
+    await loadJobs();
+
+    startGPS();
+
+  } catch (error) {
+
+    showMessage(
+      error.message
+    );
+
+  }
+
+}
+
+/* =====================================================
+   COMPLETE
+===================================================== */
+
+async function completeJob(
+  id
+) {
+
+  if (
+    !confirm(
+      "ยืนยันว่าจบทริปแล้ว?"
+    )
+  ) {
+    return;
+  }
+
+  try {
+
+    await api(
+      `/api/driver/jobs/${id}/complete`,
+      {
+        method: "POST"
+      }
+    );
+
+    showMessage(
+      "จบทริปเรียบร้อย",
+      "success"
+    );
+
+    await loadJobs();
+
+  } catch (error) {
+
+    showMessage(
+      error.message
+    );
+
+  }
+
+}
+
+/* =====================================================
+   GPS
+===================================================== */
+
+function startGPS() {
+
+  if (
+    gpsWatchId !== null
+  ) {
+    return;
+  }
+
+  if (
+    !navigator.geolocation
+  ) {
+
+    $("gpsStatus").textContent =
+      "Browser ไม่รองรับ GPS";
+
+    return;
+
+  }
+
+  gpsWatchId =
+    navigator.geolocation.watchPosition(
+      async position => {
+
+        const coords =
+          position.coords;
+
+        $("gpsStatus").textContent =
+          `GPS ทำงาน · ${
+            coords.latitude.toFixed(5)
+          }, ${
+            coords.longitude.toFixed(5)
+          }`;
+
+        try {
+
+          await api(
+            "/api/driver/location",
+            {
+              method: "POST",
+
+              body:
+                JSON.stringify({
+
+                  latitude:
+                    coords.latitude,
+
+                  longitude:
+                    coords.longitude,
+
+                  heading:
+                    coords.heading,
+
+                  speed:
+                    coords.speed,
+
+                  accuracy:
+                    coords.accuracy
+
+                })
+            }
+          );
+
+        } catch (error) {
+
+          console.error(
+            error
+          );
+
+        }
+
+      },
+
+      error => {
+
+        console.error(
+          error
+        );
+
+        $("gpsStatus").textContent =
+          "ไม่สามารถอ่าน GPS";
+
+      },
+
+      {
+        enableHighAccuracy:
+          true,
+
+        maximumAge:
+          3000,
+
+        timeout:
+          10000
+      }
+    );
+
+}
+
+/* =====================================================
+   LOAD JOBS
+===================================================== */
+
+async function loadJobs() {
+
+  try {
+
+    const data =
+      await api(
+        "/api/driver/jobs"
+      );
+
+    jobs =
+      data.jobs || [];
+
+    renderJobs();
+
+    updateMap();
+
+    /*
+     * ถ้ามีงาน accepted
+     * ให้เริ่ม GPS
+     */
+
+    if (
+      jobs.some(
+        j =>
+          j.status ===
+          "accepted"
+      )
+    ) {
+
+      startGPS();
+
+    }
+
+  } catch (error) {
+
+    showMessage(
+      error.message
+    );
+
+  }
+
+}
+
+/* =====================================================
+   MAP
+===================================================== */
+
+function updateMap() {
+
+  initMap("map");
+
+  clearMapMarkers();
+
+  let firstJob =
+    jobs.find(
+      j =>
+        j.status ===
+        "accepted"
+    );
+
+  if (!firstJob) {
+    firstJob =
+      jobs[0];
+  }
+
+  if (!firstJob) {
+    return;
+  }
+
+  showGroupOnMap(
+    firstJob
+  );
+
+}
+
+/* =====================================================
+   REALTIME
+===================================================== */
+
+async function subscribeRealtime() {
+
+  const s =
+    getSession();
+
+  const url =
+    localStorage.getItem(
+      "UP_SUPABASE_URL"
+    );
+
+  const key =
+    localStorage.getItem(
+      "UP_SUPABASE_PUBLISHABLE_KEY"
+    );
+
+  if (
+    !url ||
+    !key ||
+    !s
+  ) {
+    return;
+  }
+
+  const client =
+    window.supabase.createClient(
+      url,
+      key,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      }
+    );
+
+  await client.auth.setSession({
+    access_token:
+      s.access_token,
+
+    refresh_token:
+      s.refresh_token
+  });
+
+  client.realtime.setAuth(
+    s.access_token
+  );
+
+  realtimeChannel =
+    client
+      .channel(
+        "driver-dashboard"
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ride_groups"
+        },
+        async () => {
+
+          await loadJobs();
+
+        }
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ride_group_members"
+        },
+        async () => {
+
+          await loadJobs();
+
+        }
+      )
+
+      .subscribe();
+
+}
+
+/* =====================================================
+   INIT
+===================================================== */
+
+async function init() {
+
+  session =
+    getSession();
+
+  profile =
+    getProfile();
+
+  if (
+    !session ||
+    !profile
+  ) {
+
+    location.href =
+      "/";
+
+    return;
+
+  }
+
+  if (
+    profile.role !==
+    "driver"
+  ) {
+
+    location.href =
+      "/passenger.html";
+
+    return;
+
+  }
+
+  $("driverInfo").textContent =
+    `${profile.name} · รถ ${profile.vehicle_seats} ที่นั่ง`;
+
+  initMap("map");
+
+  await loadJobs();
+
+  await subscribeRealtime();
+
+}
+
+function logout() {
+
+  localStorage.removeItem(
+    "up_drive_session"
+  );
+
+  localStorage.removeItem(
+    "up_drive_profile"
+  );
+
+  location.href =
+    "/";
+
+}
+
+init();
+
+</script>
+
+</body>
+</html>

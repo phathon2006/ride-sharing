@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>UP Drive</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+</head>
+
+<body>
+
+<nav class="navbar">
+
+  <div class="logo">
+    🚗 UP Drive
+  </div>
+
+  <div class="nav-links">
+    <a href="/">เข้าสู่ระบบ</a>
+  </div>
+
+</nav>
+
+<main class="container">
+
+  <section class="hero">
+
+    <h1>
+      UP Drive
+    </h1>
+
+    <p>
+      ระบบแชร์ค่าเดินทางสำหรับนักศึกษา
+      มหาวิทยาลัยพะเยา
+    </p>
+
+    <p>
+      📍 GPS · 🗺️ แผนที่ · 🚗 Driver · ⚡ Realtime
+    </p>
+
+  </section>
+
+  <div
+    id="message"
+    style="display:none"
+  ></div>
+
+  <div class="grid">
+
+    <!-- LOGIN -->
+
+    <section class="card">
+
+      <h2>เข้าสู่ระบบ</h2>
+
+      <form id="loginForm">
+
+        <div class="form-group">
+
+          <label>
+            Email
+          </label>
+
+          <input
+            id="loginEmail"
+            type="email"
+            required
+            placeholder="student@example.com"
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            รหัสผ่าน
+          </label>
+
+          <input
+            id="loginPassword"
+            type="password"
+            required
+            placeholder="อย่างน้อย 6 ตัว"
+          >
+
+        </div>
+
+        <button
+          class="btn btn-primary btn-block"
+          type="submit"
+        >
+          เข้าสู่ระบบ
+        </button>
+
+      </form>
+
+    </section>
+
+    <!-- REGISTER -->
+
+    <section class="card">
+
+      <h2>สมัครสมาชิก</h2>
+
+      <form id="registerForm">
+
+        <div class="form-group">
+
+          <label>
+            ชื่อ
+          </label>
+
+          <input
+            id="name"
+            required
+            placeholder="ชื่อ-นามสกุล"
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            Email
+          </label>
+
+          <input
+            id="email"
+            type="email"
+            required
+            placeholder="student@example.com"
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            เบอร์โทร
+          </label>
+
+          <input
+            id="phone"
+            placeholder="08xxxxxxxx"
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            ประเภทบัญชี
+          </label>
+
+          <select id="role">
+
+            <option value="passenger">
+              ผู้โดยสาร
+            </option>
+
+            <option value="driver">
+              คนขับ
+            </option>
+
+          </select>
+
+        </div>
+
+        <div
+          id="vehicleBox"
+          class="form-group"
+          style="display:none"
+        >
+
+          <label>
+            จำนวนที่นั่งรถ
+          </label>
+
+          <input
+            id="vehicleSeats"
+            type="number"
+            min="1"
+            max="10"
+            value="4"
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            รหัสผ่าน
+          </label>
+
+          <input
+            id="password"
+            type="password"
+            minlength="6"
+            required
+          >
+
+        </div>
+
+        <button
+          class="btn btn-primary btn-block"
+          type="submit"
+        >
+          สมัครสมาชิก
+        </button>
+
+      </form>
+
+    </section>
+
+  </div>
+
+</main>
+
+<script>
+
+const $ = (id) =>
+  document.getElementById(id);
+
+function showMessage(
+  text,
+  type = "error"
+) {
+  const box =
+    $("message");
+
+  box.className =
+    `alert ${
+      type === "success"
+        ? "alert-success"
+        : "alert-error"
+    }`;
+
+  box.textContent =
+    text;
+
+  box.style.display =
+    "block";
+}
+
+function saveSession(data) {
+
+  localStorage.setItem(
+    "up_drive_session",
+    JSON.stringify(
+      data.session
+    )
+  );
+
+  localStorage.setItem(
+    "up_drive_profile",
+    JSON.stringify(
+      data.profile
+    )
+  );
+}
+
+function redirectByRole(
+  profile
+) {
+
+  if (
+    profile.role ===
+    "driver"
+  ) {
+    location.href =
+      "/driver.html";
+  } else {
+    location.href =
+      "/passenger.html";
+  }
+}
+
+$("role").addEventListener(
+  "change",
+  () => {
+
+    $("vehicleBox")
+      .style.display =
+      $("role").value ===
+      "driver"
+        ? "block"
+        : "none";
+
+  }
+);
+
+$("loginForm").addEventListener(
+  "submit",
+  async (event) => {
+
+    event.preventDefault();
+
+    try {
+
+      const response =
+        await fetch(
+          "/api/auth/login",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+                email:
+                  $("loginEmail").value,
+
+                password:
+                  $("loginPassword").value
+              })
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error
+        );
+      }
+
+      saveSession(data);
+
+      redirectByRole(
+        data.profile
+      );
+
+    } catch (error) {
+
+      showMessage(
+        error.message
+      );
+
+    }
+
+  }
+);
+
+$("registerForm").addEventListener(
+  "submit",
+  async (event) => {
+
+    event.preventDefault();
+
+    try {
+
+      const response =
+        await fetch(
+          "/api/auth/register",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+
+                name:
+                  $("name").value,
+
+                email:
+                  $("email").value,
+
+                phone:
+                  $("phone").value,
+
+                password:
+                  $("password").value,
+
+                role:
+                  $("role").value,
+
+                vehicleSeats:
+                  $("vehicleSeats").value
+
+              })
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error
+        );
+      }
+
+      if (
+        data.session &&
+        data.profile
+      ) {
+
+        saveSession(data);
+
+        showMessage(
+          "สมัครสมาชิกสำเร็จ",
+          "success"
+        );
+
+        setTimeout(() => {
+          redirectByRole(
+            data.profile
+          );
+        }, 500);
+
+      } else {
+
+        showMessage(
+          "สมัครสำเร็จ กรุณาเข้าสู่ระบบ",
+          "success"
+        );
+
+      }
+
+    } catch (error) {
+
+      showMessage(
+        error.message
+      );
+
+    }
+
+  }
+);
+
+</script>
+
+</body>
+</html>

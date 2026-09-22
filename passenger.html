@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>UP Drive - Passenger</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
+
+</head>
+
+<body>
+
+<nav class="navbar">
+
+  <div class="logo">
+    🚗 UP Drive
+  </div>
+
+  <div class="nav-links">
+
+    <a href="/passenger.html">
+      เดินทาง
+    </a>
+
+    <a href="/history.html">
+      ประวัติ
+    </a>
+
+    <button onclick="logout()">
+      ออกจากระบบ
+    </button>
+
+  </div>
+
+</nav>
+
+<main class="container">
+
+  <div
+    id="message"
+    style="display:none"
+  ></div>
+
+  <section class="hero">
+
+    <h1>
+      ผู้โดยสาร
+    </h1>
+
+    <p id="welcome">
+      กำลังโหลด...
+    </p>
+
+  </section>
+
+  <div class="grid">
+
+    <!-- CREATE RIDE -->
+
+    <section class="card">
+
+      <h2>
+        🚗 สร้างรายการเดินทาง
+      </h2>
+
+      <form id="rideForm">
+
+        <div class="form-group">
+
+          <label>
+            ต้นทาง
+          </label>
+
+          <div class="actions">
+
+            <input
+              id="origin"
+              placeholder="เช่น หอพักใกล้ ม.พะเยา"
+              required
+            >
+
+            <button
+              type="button"
+              class="btn btn-location"
+              onclick="useCurrentLocation()"
+            >
+              📍 GPS
+            </button>
+
+          </div>
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            ปลายทาง
+          </label>
+
+          <input
+            id="destination"
+            placeholder="เช่น มหาวิทยาลัยพะเยา"
+            required
+          >
+
+        </div>
+
+        <div class="form-group">
+
+          <label>
+            จำนวนผู้โดยสารเป้าหมายของกลุ่ม
+          </label>
+
+          <input
+            id="targetPassengers"
+            type="number"
+            min="1"
+            max="10"
+            value="2"
+            required
+          >
+
+          <div class="muted small">
+            จำนวนนี้เป็นเป้าหมายของกลุ่ม
+            ไม่จำเป็นต้องครบก่อนส่งงานให้คนขับ
+          </div>
+
+        </div>
+
+        <button
+          class="btn btn-primary btn-block"
+          type="submit"
+          id="createRideButton"
+        >
+          🔎 ค้นหาผู้โดยสารเส้นทางใกล้กัน
+        </button>
+
+      </form>
+
+    </section>
+
+    <!-- GROUP -->
+
+    <section class="card">
+
+      <h2>
+        👥 กลุ่มเดินทาง
+      </h2>
+
+      <div id="groupBox">
+
+        <div class="empty">
+          ยังไม่มีรายการเดินทาง
+        </div>
+
+      </div>
+
+    </section>
+
+  </div>
+
+  <br>
+
+  <!-- MAP -->
+
+  <section class="card">
+
+    <h2>
+      🗺️ แผนที่และเส้นทาง
+    </h2>
+
+    <div
+      id="map"
+      class="map"
+    ></div>
+
+  </section>
+
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script src="/map.js"></script>
+
+<script>
+
+const $ = (id) =>
+  document.getElementById(id);
+
+let session = null;
+
+let profile = null;
+
+let activeRide = null;
+
+let activeGroup = null;
+
+let currentOrigin = null;
+
+let realtimeChannel = null;
+
+function getSession() {
+
+  try {
+
+    return JSON.parse(
+      localStorage.getItem(
+        "up_drive_session"
+      )
+    );
+
+  } catch {
+
+    return null;
+
+  }
+}
+
+function getProfile() {
+
+  try {
+
+    return JSON.parse(
+      localStorage.getItem(
+        "up_drive_profile"
+      )
+    );
+
+  } catch {
+
+    return null;
+
+  }
+}
+
+function showMessage(
+  text,
+  type = "error"
+) {
+
+  const box =
+    $("message");
+
+  box.className =
+    `alert ${
+      type === "success"
+        ? "alert-success"
+        : "alert-error"
+    }`;
+
+  box.textContent =
+    text;
+
+  box.style.display =
+    "block";
+}
+
+function escapeHtml(value) {
+
+  return String(
+    value || ""
+  )
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+async function api(
+  url,
+  options = {}
+) {
+
+  const token =
+    session?.access_token;
+
+  const response =
+    await fetch(
+      url,
+      {
+        ...options,
+
+        headers: {
+          "Content-Type":
+            "application/json",
+
+          ...(token
+            ? {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            : {}),
+
+          ...(options.headers || {})
+        }
+      }
+    );
+
+  const data =
+    await response
+      .json()
+      .catch(() => ({}));
+
+  if (
+    response.status === 401
+  ) {
+
+    logout();
+
+    throw new Error(
+      "Session หมดอายุ"
+    );
+
+  }
+
+  if (!response.ok) {
+
+    throw new Error(
+      data.error ||
+      "เกิดข้อผิดพลาด"
+    );
+
+  }
+
+  return data;
+}
+
+/* =====================================================
+   GPS
+===================================================== */
+
+async function useCurrentLocation() {
+
+  if (
+    !navigator.geolocation
+  ) {
+
+    showMessage(
+      "Browser นี้ไม่รองรับ GPS"
+    );
+
+    return;
+
+  }
+
+  showMessage(
+    "กำลังอ่านตำแหน่ง GPS...",
+    "success"
+  );
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+
+      try {
+
+        const lat =
+          position.coords.latitude;
+
+        const lng =
+          position.coords.longitude;
+
+        currentOrigin = {
+          lat,
+          lng
+        };
+
+        const data =
+          await api(
+            "/api/geocode/reverse",
+            {
+              method: "POST",
+
+              body:
+                JSON.stringify({
+                  lat,
+                  lng
+                })
+            }
+          );
+
+        $("origin").value =
+          data.displayName;
+
+        showMessage(
+          "ใช้ตำแหน่งปัจจุบันเป็นต้นทางแล้ว",
+          "success"
+        );
+
+        showRidePreview();
+
+      } catch (error) {
+
+        showMessage(
+          error.message
+        );
+
+      }
+
+    },
+
+    () => {
+
+      showMessage(
+        "ไม่สามารถอ่าน GPS ได้ กรุณาอนุญาต Location ใน Browser"
+      );
+
+    },
+
+    {
+      enableHighAccuracy: true,
+
+      timeout: 15000,
+
+      maximumAge: 0
+    }
+  );
+}
+
+/* =====================================================
+   FORM
+===================================================== */
+
+$("rideForm").addEventListener(
+  "submit",
+  async (event) => {
+
+    event.preventDefault();
+
+    const button =
+      $("createRideButton");
+
+    button.disabled =
+      true;
+
+    button.textContent =
+      "กำลังค้นหา...";
+
+    try {
+
+      const data =
+        await api(
+          "/api/rides",
+          {
+            method: "POST",
+
+            body:
+              JSON.stringify({
+
+                origin:
+                  $("origin").value,
+
+                destination:
+                  $("destination").value,
+
+                targetPassengers:
+                  Number(
+                    $("targetPassengers")
+                      .value
+                  ),
+
+                originLat:
+                  currentOrigin?.lat,
+
+                originLng:
+                  currentOrigin?.lng
+
+              })
+          }
+        );
+
+      activeRide =
+        data.ride;
+
+      activeGroup =
+        data.group;
+
+      renderGroup();
+
+      subscribeRealtime();
+
+      showMessage(
+        "สร้างรายการเดินทางเรียบร้อย",
+        "success"
+      );
+
+    } catch (error) {
+
+      showMessage(
+        error.message
+      );
+
+    } finally {
+
+      button.disabled =
+        false;
+
+      button.textContent =
+        "🔎 ค้นหาผู้โดยสารเส้นทางใกล้กัน";
+
+    }
+
+  }
+);
+
+/* =====================================================
+   RENDER GROUP
+===================================================== */
+
+function renderGroup() {
+
+  if (!activeGroup) {
+
+    $("groupBox").innerHTML =
+      `
+        <div class="empty">
+          ยังไม่มีข้อมูลกลุ่ม
+        </div>
+      `;
+
+    return;
+
+  }
+
+  showGroupOnMap(
+    activeGroup
+  );
+
+  const statusClass =
+    activeGroup.status ===
+    "accepted"
+      ? "status status-success"
+      : activeGroup.status ===
+        "sent_to_driver"
+      ? "status status-warning"
+      : "status";
+
+  let html =
+    `
+      <div>
+
+        <span class="${statusClass}">
+          ${escapeHtml(
+            activeGroup.status_label
+          )}
+        </span>
+
+        <div class="grid-3" style="margin-top:15px">
+
+          <div class="stat">
+            <div class="stat-number">
+              ${activeGroup.actual_passengers}
+            </div>
+            <div>
+              ผู้โดยสารปัจจุบัน
+            </div>
+          </div>
+
+          <div class="stat">
+            <div class="stat-number">
+              ${activeGroup.target_passengers}
+            </div>
+            <div>
+              เป้าหมาย
+            </div>
+          </div>
+
+          <div class="stat">
+            <div class="stat-number">
+              ${
+                activeGroup.members
+                  ?.filter(
+                    m =>
+                      m.confirmed
+                  )
+                  .length || 0
+              }
+            </div>
+            <div>
+              ยืนยันแล้ว
+            </div>
+          </div>
+
+        </div>
+
+        <hr>
+
+        <h3>
+          สมาชิก
+        </h3>
+    `;
+
+  for (
+    const member of
+    activeGroup.members || []
+  ) {
+
+    html +=
+      `
+        <div class="member">
+
+          <div class="member-row">
+
+            <strong>
+              👤 ${
+                escapeHtml(
+                  member.passenger?.name
+                )
+              }
+            </strong>
+
+            ${
+              member.confirmed
+                ? `
+                  <span class="status status-success">
+                    ✓ ยืนยันแล้ว
+                  </span>
+                `
+                : `
+                  <span class="status status-warning">
+                    รอยืนยัน
+                  </span>
+                `
+            }
+
+          </div>
+
+          <div class="route-line">
+
+            <div class="point point-pickup">
+              📍
+              ${escapeHtml(
+                member.ride?.origin_text
+              )}
+            </div>
+
+            <div class="point point-destination">
+              🏁
+              ${escapeHtml(
+                member.ride?.destination_text
+              )}
+            </div>
+
+          </div>
+
+        </div>
+      `;
+
+  }
+
+  if (
+    activeGroup.status ===
+    "forming"
+  ) {
+
+    const myMember =
+      activeGroup.members.find(
+        m =>
+          m.passenger_id ===
+          profile.id
+      );
+
+    if (
+      myMember &&
+      !myMember.confirmed
+    ) {
+
+      html +=
+        `
+          <button
+            class="btn btn-primary btn-block"
+            onclick="confirmGroup()"
+          >
+            ✓ ยืนยันกลุ่มเดินทาง
+          </button>
+
+          <p class="muted small">
+            เมื่อสมาชิกปัจจุบันทุกคนยืนยัน
+            ระบบจะส่งงานให้คนขับทันที
+            โดยไม่ต้องรอให้จำนวนถึงเป้าหมาย
+          </p>
+        `;
+
+    } else {
+
+      html +=
+        `
+          <div class="alert alert-success">
+            ✓ คุณยืนยันแล้ว
+            กำลังรอสมาชิกคนอื่น
+          </div>
+        `;
+
+    }
+
+  }
+
+  if (
+    activeGroup.status ===
+    "sent_to_driver"
+  ) {
+
+    html +=
+      `
+        <div class="alert alert-success">
+
+          🚗 ส่งงานให้คนขับแล้ว
+
+          <br>
+
+          กำลังรอคนขับรับงาน
+
+        </div>
+      `;
+
+  }
+
+  if (
+    activeGroup.status ===
+    "accepted"
+  ) {
+
+    html +=
+      `
+        <div class="alert alert-success">
+
+          🚗 คนขับรับงานแล้ว
+
+          ${
+            activeGroup.driver
+              ? `
+                <br><br>
+                <strong>
+                  คนขับ:
+                </strong>
+                ${escapeHtml(
+                  activeGroup.driver.name
+                )}
+
+                <br>
+
+                <strong>
+                  โทร:
+                </strong>
+                ${escapeHtml(
+                  activeGroup.driver.phone
+                )}
+
+                <br>
+
+                <strong>
+                  รถ:
+                </strong>
+                ${
+                  activeGroup.driver
+                    .vehicle_seats
+                } ที่นั่ง
+              `
+              : ""
+          }
+
+        </div>
+      `;
+
+  }
+
+  if (
+    activeGroup.route
+  ) {
+
+    html +=
+      `
+        <div class="member">
+
+          <strong>
+            🛣️ เส้นทาง
+          </strong>
+
+          <p>
+            ระยะทาง:
+            ${formatDistance(
+              activeGroup.route
+                .distance_meters
+            )}
+          </p>
+
+          <p>
+            เวลาโดยประมาณ:
+            ${formatDuration(
+              activeGroup.route
+                .duration_seconds
+            )}
+          </p>
+
+        </div>
+      `;
+
+  }
+
+  html +=
+    `</div>`;
+
+  $("groupBox").innerHTML =
+    html;
+}
+
+/* =====================================================
+   CONFIRM
+===================================================== */
+
+async function confirmGroup() {
+
+  if (!activeGroup) {
+    return;
+  }
+
+  try {
+
+    const data =
+      await api(
+        `/api/groups/${activeGroup.id}/confirm`,
+        {
+          method: "POST"
+        }
+      );
+
+    activeGroup =
+      data.group;
+
+    renderGroup();
+
+  } catch (error) {
+
+    showMessage(
+      error.message
+    );
+
+  }
+}
+
+/* =====================================================
+   PREVIEW
+===================================================== */
+
+function showRidePreview() {
+
+  if (
+    !currentOrigin
+  ) {
+    return;
+  }
+
+  const destination =
+    $("destination").value.trim();
+
+  if (!destination) {
+    return;
+  }
+
+  /*
+   * ตอนสร้างจริง server จะ geocode
+   * ดังนั้น preview ใช้เฉพาะ origin
+   */
+
+  initMap("map");
+
+  clearMapMarkers();
+
+  addPoint(
+    currentOrigin.lat,
+    currentOrigin.lng,
+    "ตำแหน่งปัจจุบัน",
+    "pickup"
+  );
+
+}
+
+/* =====================================================
+   REALTIME
+===================================================== */
+
+async function subscribeRealtime() {
+
+  if (!activeGroup) {
+    return;
+  }
+
+  if (realtimeChannel) {
+
+    try {
+
+      await window.supabaseClient
+        .removeChannel(
+          realtimeChannel
+        );
+
+    } catch {}
+
+  }
+
+  const sessionData =
+    getSession();
+
+  if (
+    !sessionData?.access_token
+  ) {
+    return;
+  }
+
+  window.supabaseClient =
+    window.supabase.createClient(
+      getSupabaseUrl(),
+      getSupabaseKey(),
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      }
+    );
+
+  await window.supabaseClient.auth.setSession({
+    access_token:
+      sessionData.access_token,
+
+    refresh_token:
+      sessionData.refresh_token
+  });
+
+  window.supabaseClient.realtime.setAuth(
+    sessionData.access_token
+  );
+
+  realtimeChannel =
+    window.supabaseClient
+      .channel(
+        `passenger-group-${activeGroup.id}`
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ride_groups",
+          filter:
+            `id=eq.${activeGroup.id}`
+        },
+        async () => {
+
+          await reloadActiveRide();
+
+        }
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ride_group_members",
+          filter:
+            `group_id=eq.${activeGroup.id}`
+        },
+        async () => {
+
+          await reloadActiveRide();
+
+        }
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ride_routes",
+          filter:
+            `group_id=eq.${activeGroup.id}`
+        },
+        async () => {
+
+          await reloadActiveRide();
+
+        }
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "driver_locations"
+        },
+        (payload) => {
+
+          if (
+            payload.eventType !==
+            "INSERT" &&
+            payload.eventType !==
+            "UPDATE"
+          ) {
+            return;
+          }
+
+          const location =
+            payload.new;
+
+          if (
+            activeGroup.driver_id ===
+            location.driver_id
+          ) {
+
+            updateDriverMarker(
+              location.driver_id,
+              location.latitude,
+              location.longitude,
+              activeGroup.driver?.name ||
+                "คนขับ"
+            );
+
+          }
+
+        }
+      )
+
+      .subscribe();
+
+}
+
+/* =====================================================
+   RELOAD
+===================================================== */
+
+async function reloadActiveRide() {
+
+  if (!activeRide) {
+    return;
+  }
+
+  try {
+
+    const data =
+      await api(
+        `/api/rides/${activeRide.id}`
+      );
+
+    activeRide =
+      data.ride;
+
+    activeGroup =
+      data.group;
+
+    renderGroup();
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+}
+
+/* =====================================================
+   INIT
+===================================================== */
+
+async function init() {
+
+  session =
+    getSession();
+
+  profile =
+    getProfile();
+
+  if (
+    !session ||
+    !profile
+  ) {
+
+    location.href =
+      "/";
+
+    return;
+
+  }
+
+  if (
+    profile.role !==
+    "passenger"
+  ) {
+
+    location.href =
+      "/driver.html";
+
+    return;
+
+  }
+
+  $("welcome").textContent =
+    `สวัสดี ${profile.name}`;
+
+  initMap("map");
+
+  try {
+
+    const data =
+      await api(
+        "/api/rides/active"
+      );
+
+    if (
+      data.ride
+    ) {
+
+      activeRide =
+        data.ride;
+
+      activeGroup =
+        data.group;
+
+      renderGroup();
+
+      subscribeRealtime();
+
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+
+}
+
+function getSupabaseUrl() {
+
+  /*
+   * Supabase URL ไม่ใช่ secret
+   *
+   * ใส่ URL ของ project ตรงนี้
+   */
+
+  return localStorage.getItem(
+    "UP_SUPABASE_URL"
+  ) || prompt(
+    "ใส่ Supabase URL ครั้งแรก เช่น https://xxxx.supabase.co"
+  );
+
+}
+
+function getSupabaseKey() {
+
+  return localStorage.getItem(
+    "UP_SUPABASE_PUBLISHABLE_KEY"
+  ) || prompt(
+    "ใส่ Supabase Publishable Key ครั้งแรก"
+  );
+
+}
+
+function logout() {
+
+  localStorage.removeItem(
+    "up_drive_session"
+  );
+
+  localStorage.removeItem(
+    "up_drive_profile"
+  );
+
+  location.href =
+    "/";
+
+}
+
+init();
+
+</script>
+
+</body>
+</html>
